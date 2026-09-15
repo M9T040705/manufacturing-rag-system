@@ -32,36 +32,65 @@
 
 ### 系统架构图
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        API 层 (FastAPI)                            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-│  │ 智能问答  │  │ 流式输出  │  │ 文档管理  │  │ 系统监控  │       │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │
-├─────────────────────────────────────────────────────────────────┤
-│                      业务编排层 (LangChain LCEL)                   │
-│  查询改写 → 混合检索 → Rerank精排 → 上下文构建 → LLM生成 → 引用标注  │
-├──────────────────┬──────────────────┬───────────────────────────┤
-│   文档处理层      │     检索层        │        LLM 推理层           │
-│  ┌────────────┐  │  ┌────────────┐  │  ┌────────────────────┐  │
-│  │ PDF/Word   │  │  │ 向量检索    │  │  │ 本地 vLLM          │  │
-│  │ PPT/TXT    │  │  │ (BGE-large)│  │  │ Qwen2.5-14B       │  │
-│  │ 图片OCR    │  │  │ BM25检索    │  │  │ GPU推理            │  │
-│  │ (PaddleOCR)│  │  │ RRF融合     │  │  └────────────────────┘  │
-│  │ 语义分块    │  │  │ Rerank精排  │  │  ┌────────────────────┐  │
-│  │ (标题感知)  │  │  │ (bge-rerank)│  │  │ 云端兜底            │  │
-│  └────────────┘  │  └────────────┘  │  │ DeepSeek            │  │
-│                   │                   │  └────────────────────┘  │
-├───────────────────┴───────────────────┴───────────────────────────┤
-│                        存储层                                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
-│  │ Milvus 2.4   │  │ Redis 7      │  │ 本地文件存储           │   │
-│  │ 向量数据库    │  │ 缓存/会话     │  │ 原始文档/处理结果      │   │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘   │
-├─────────────────────────────────────────────────────────────────┤
-│                      系统集成层 (OA 对接)                           │
-│  SSO统一认证  │  文档增量同步  │  操作审计日志  │  老旧系统API适配   │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph APILayer["🌐 API 层（FastAPI）"]
+        A1["💬 智能问答"]
+        A2["⚡ 流式输出"]
+        A3["📄 文档管理"]
+        A4["📊 系统监控"]
+    end
+
+    subgraph Orchestration["🔗 业务编排层（LangChain LCEL）"]
+        B1["查询改写"] --> B2["混合检索"] --> B3["Rerank精排"] --> B4["上下文构建"] --> B5["LLM生成"] --> B6["引用标注"]
+    end
+
+    subgraph DocLayer["📑 文档处理层"]
+        C1["PDF/Word/PPT/TXT"]
+        C2["🖼️ 图片OCR<br/>(PaddleOCR)"]
+        C3["✂️ 语义分块<br/>(标题感知+术语保护)"]
+    end
+
+    subgraph RetrievalLayer["🔍 检索层"]
+        D1["向量检索<br/>(BGE-large-zh)"]
+        D2["BM25关键词检索"]
+        D3["🔀 RRF融合"]
+        D4["🎯 Rerank精排<br/>(bge-reranker-v2-m3)"]
+    end
+
+    subgraph LLMLayer["🧠 LLM 推理层"]
+        E1["本地 vLLM<br/>Qwen2.5-14B<br/>GPU推理"]
+        E2["☁️ 云端兜底<br/>DeepSeek"]
+    end
+
+    subgraph StorageLayer["💾 存储层"]
+        F1["Milvus 2.4<br/>向量数据库"]
+        F2["Redis 7<br/>缓存/会话"]
+        F3["本地文件存储<br/>原始文档/处理结果"]
+    end
+
+    subgraph IntegrationLayer["🔌 系统集成层（OA 对接）"]
+        G1["SSO统一认证"]
+        G2["📥 文档增量同步"]
+        G3["📝 操作审计日志"]
+        G4["🔧 老旧系统API适配"]
+    end
+
+    APILayer --> Orchestration
+    Orchestration --> DocLayer
+    Orchestration --> RetrievalLayer
+    Orchestration --> LLMLayer
+    DocLayer --> StorageLayer
+    RetrievalLayer --> StorageLayer
+    IntegrationLayer -.-> Orchestration
+
+    style APILayer fill:#e8f4fd,stroke:#4a90d9,stroke-width:2px
+    style Orchestration fill:#f0f0ff,stroke:#7c3aed,stroke-width:2px
+    style DocLayer fill:#fff7e6,stroke:#faad14,stroke-width:2px
+    style RetrievalLayer fill:#e6f7f0,stroke:#52c41a,stroke-width:2px
+    style LLMLayer fill:#f9f0ff,stroke:#722ed1,stroke-width:2px
+    style StorageLayer fill:#f6ffed,stroke:#389e0d,stroke-width:2px
+    style IntegrationLayer fill:#fff2e8,stroke:#d46b08,stroke-width:2px
 ```
 
 ### 技术选型决策

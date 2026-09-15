@@ -27,26 +27,56 @@
 
 系统采用经典的六层架构，每一层职责单一、接口明确：
 
-```
-┌─────────────────────────────────────────────────┐
-│  API 层 (FastAPI)                                │
-│  路由 / 请求校验 / 响应封装 / 流式输出            │
-├─────────────────────────────────────────────────┤
-│  业务编排层 (LangChain LCEL)                     │
-│  查询改写 / 检索编排 / 上下文构建 / LLM调用      │
-├──────────────────┬──────────────────┬───────────┤
-│  文档处理层       │  检索层           │  LLM 层   │
-│  加载 / 解析      │  向量检索         │  本地推理  │
-│  分块 / OCR      │  BM25检索         │  云端兜底  │
-│  元数据提取       │  RRF融合          │  流式输出  │
-│                  │  Rerank精排       │           │
-├──────────────────┴──────────────────┴───────────┤
-│  存储层 (Milvus + Redis + 文件系统)               │
-│  向量存储 / 缓存 / 原始文档                        │
-├─────────────────────────────────────────────────┤
-│  系统集成层 (OA 对接)                              │
-│  SSO认证 / 增量同步 / 审计日志                     │
-└─────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph APILayer["🌐 API 层（FastAPI）"]
+        A["路由 / 请求校验 / 响应封装 / 流式输出"]
+    end
+
+    subgraph Orchestration["🔗 业务编排层（LangChain LCEL）"]
+        B["查询改写 / 检索编排 / 上下文构建 / LLM调用"]
+    end
+
+    subgraph CoreLayers["⚙️ 核心处理层"]
+        direction LR
+        subgraph DocLayer["📑 文档处理层"]
+            C1["加载 / 解析"]
+            C2["分块 / OCR"]
+            C3["元数据提取"]
+        end
+        subgraph RetrievalLayer["🔍 检索层"]
+            D1["向量检索"]
+            D2["BM25检索"]
+            D3["RRF融合"]
+            D4["Rerank精排"]
+        end
+        subgraph LLMLayer["🧠 LLM 层"]
+            E1["本地推理"]
+            E2["云端兜底"]
+            E3["流式输出"]
+        end
+    end
+
+    subgraph StorageLayer["💾 存储层（Milvus + Redis + 文件系统）"]
+        F["向量存储 / 缓存 / 原始文档"]
+    end
+
+    subgraph IntegrationLayer["🔌 系统集成层（OA 对接）"]
+        G["SSO认证 / 增量同步 / 审计日志"]
+    end
+
+    APILayer --> Orchestration
+    Orchestration --> CoreLayers
+    CoreLayers --> StorageLayer
+    IntegrationLayer -.-> Orchestration
+
+    style APILayer fill:#e8f4fd,stroke:#4a90d9,stroke-width:2px
+    style Orchestration fill:#f0f0ff,stroke:#7c3aed,stroke-width:2px
+    style DocLayer fill:#fff7e6,stroke:#faad14,stroke-width:2px
+    style RetrievalLayer fill:#e6f7f0,stroke:#52c41a,stroke-width:2px
+    style LLMLayer fill:#f9f0ff,stroke:#722ed1,stroke-width:2px
+    style StorageLayer fill:#f6ffed,stroke:#389e0d,stroke-width:2px
+    style IntegrationLayer fill:#fff2e8,stroke:#d46b08,stroke-width:2px
 ```
 
 ### 2.2 各层职责
@@ -223,38 +253,43 @@ Reranker 使用交叉编码（Cross-encoder），将查询和文档拼接后一�
 
 ### 4.1 文档入库流程
 
-```
-上传文档 → 格式检测 → 文本提取(PDF/Word/PPT)
-                ↓ 文本过少?
-                是 → OCR识别 → 文本提取
-                ↓
-         语义分块(标题感知+术语保护)
-                ↓
-         元数据提取(来源/页码/标题)
-                ↓
-         嵌入向量生成(BGE-large)
-                ↓
-         Milvus批量插入
-                ↓
-         入库完成(返回块数/向量数)
+```mermaid
+flowchart TB
+    A["📤 上传文档"] --> B["🔍 格式检测"]
+    B --> C{"文本过少?"}
+    C -->|"是"| D["🖼️ OCR识别<br/>(PaddleOCR)"]
+    C -->|"否"| E["📝 文本提取<br/>(PDF/Word/PPT)"]
+    D --> E
+    E --> F["✂️ 语义分块<br/>(标题感知+术语保护)"]
+    F --> G["🏷️ 元数据提取<br/>(来源/页码/标题)"]
+    G --> H["🧮 嵌入向量生成<br/>(BGE-large-zh)"]
+    H --> I["💾 Milvus批量插入"]
+    I --> J["✅ 入库完成<br/>(返回块数/向量数)"]
+
+    style A fill:#e8f4fd,stroke:#4a90d9,stroke-width:2px
+    style C fill:#fff7e6,stroke:#faad14,stroke-width:2px
+    style D fill:#fff2e8,stroke:#d46b08,stroke-width:2px
+    style J fill:#f6ffed,stroke:#52c41a,stroke-width:2px
 ```
 
 ### 4.2 问答流程
 
-```
-用户问题 → 查询改写(多轮上下文)
-      ↓
-  嵌入向量生成
-      ↓
-  混合检索(向量+BM25)
-      ↓
-  RRF融合 → Rerank精排 → Top-N
-      ↓
-  上下文构建(文档拼接+来源标注)
-      ↓
-  LLM生成(本地vLLM/云端兜底)
-      ↓
-  引用来源提取 → 响应封装 → 返回
+```mermaid
+flowchart TB
+    A["💬 用户问题"] --> B["🔄 查询改写<br/>(多轮上下文)"]
+    B --> C["🧮 嵌入向量生成"]
+    C --> D["🔀 混合检索<br/>(向量+BM25)"]
+    D --> E["🔗 RRF融合"]
+    E --> F["🎯 Rerank精排<br/>(Top-N)"]
+    F --> G["📋 上下文构建<br/>(文档拼接+来源标注)"]
+    G --> H["🧠 LLM生成<br/>(本地vLLM/云端兜底)"]
+    H --> I["📌 引用来源提取"]
+    I --> J["📦 响应封装"]
+    J --> K["✅ 返回答案"]
+
+    style A fill:#e8f4fd,stroke:#4a90d9,stroke-width:2px
+    style H fill:#f9f0ff,stroke:#722ed1,stroke-width:2px
+    style K fill:#f6ffed,stroke:#52c41a,stroke-width:2px
 ```
 
 ## 5. 扩展性设计
